@@ -2,8 +2,7 @@
 .SYNOPSIS
     Runs CPU benchmarks (Geekbench + 7-Zip) and logs results for comparison.
 .DESCRIPTION
-    Downloads tools if missing, executes benchmarks, parses results,
-    and appends them to C:\CPU_Benchmarks.csv
+    Fixed version that shows Geekbench output live and captures results properly.
 #>
 
 # ==============================
@@ -44,30 +43,47 @@ if (!(Test-Path "$WorkDir\7z.exe")) {
 }
 
 # ==============================
-# Run Geekbench
+# Run Geekbench visibly and capture output
 # ==============================
 Write-Host "`n=== Running Geekbench 6 ===" -ForegroundColor Yellow
 $GeekLog = "$WorkDir\geekbench_output.txt"
+
+# Detect available binary (x64 preferred)
+$GeekExe = if (Test-Path "$WorkDir\Geekbench\geekbench6.exe") {
+    "$WorkDir\Geekbench\geekbench6.exe"
+} elseif (Test-Path "$WorkDir\Geekbench\geekbench6_x64.exe") {
+    "$WorkDir\Geekbench\geekbench6_x64.exe"
+} elseif (Test-Path "$WorkDir\Geekbench\geekbench6_x86.exe") {
+    "$WorkDir\Geekbench\geekbench6_x86.exe"
+} else {
+    throw "Geekbench executable not found."
+}
+
 $startTime = Get-Date
-Start-Process -FilePath "$WorkDir\Geekbench\geekbench6.exe" -ArgumentList "--upload 0" -RedirectStandardOutput $GeekLog -Wait
+Write-Host "Executing: $GeekExe --upload 0"
+& $GeekExe --upload 0 | Tee-Object -FilePath $GeekLog
 $endTime = Get-Date
 $duration = [math]::Round(($endTime - $startTime).TotalSeconds,2)
 
-# Parse Geekbench results
+# Parse Geekbench results (safe check)
 $GeekOutput = Get-Content $GeekLog -Raw
 $Single = [regex]::Match($GeekOutput, "Single-Core Score:\s+(\d+)").Groups[1].Value
 $Multi  = [regex]::Match($GeekOutput, "Multi-Core Score:\s+(\d+)").Groups[1].Value
+
+if (-not $Single) { $Single = "N/A" }
+if (-not $Multi)  { $Multi  = "N/A" }
 
 # ==============================
 # Run 7-Zip benchmark
 # ==============================
 Write-Host "`n=== Running 7-Zip benchmark ===" -ForegroundColor Yellow
 $SevenLog = "$WorkDir\7zip_output.txt"
-Start-Process -FilePath "$WorkDir\7z.exe" -ArgumentList "b" -RedirectStandardOutput $SevenLog -Wait
+& "$WorkDir\7z.exe" b | Tee-Object -FilePath $SevenLog | Out-Null
 
 # Parse 7-Zip MIPS
 $SevenOutput = Get-Content $SevenLog -Raw
 $Mips = [regex]::Match($SevenOutput, "Tot:\s+(\d+)").Groups[1].Value
+if (-not $Mips) { $Mips = "N/A" }
 
 # ==============================
 # Collect system info
