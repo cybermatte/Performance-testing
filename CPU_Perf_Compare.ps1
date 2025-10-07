@@ -1,8 +1,15 @@
+# 💡 Set via environment variables or hard-code below:
+#   $env:GEEKBENCH_EMAIL   = "you@example.com"
+#   $env:GEEKBENCH_LICENSE = "XXXX-XXXX-XXXX-XXXX"
+$LicenseEmail = "mattias.lundgren"
+$LicenseKey   = ""
+
+
 <#
 .SYNOPSIS
-    Runs CPU benchmarks (Geekbench + 7-Zip) and logs results for comparison.
+    Runs Geekbench 6 and 7-Zip CPU benchmarks, logs results for comparison.
 .DESCRIPTION
-    Offline-compatible version using Geekbench Pro license unlock (email + key).
+    Uses Geekbench 6 Pro license (--unlock) and --no-upload for fully offline runs.
 #>
 
 # ==============================
@@ -13,12 +20,11 @@ $WorkDir      = "$env:TEMP\CPU_Benchmark"
 $GeekbenchUrl = "https://cdn.geekbench.com/Geekbench-6.3.0-Windows.zip"
 $SevenZipUrl  = "https://www.7-zip.org/a/7z2408-x64.exe"
 
-# 💡 Set via environment variables or hard-code below:
+# 💡 Supply via environment variables or edit here
 #   $env:GEEKBENCH_EMAIL   = "you@example.com"
 #   $env:GEEKBENCH_LICENSE = "XXXX-XXXX-XXXX-XXXX"
-$LicenseEmail = "mattias.lundgren"
-$LicenseKey   = ""
-
+$LicenseEmail = $env:GEEKBENCH_EMAIL
+$LicenseKey   = $env:GEEKBENCH_LICENSE
 if (-not $LicenseEmail) { $LicenseEmail = "YOUR-EMAIL-HERE" }
 if (-not $LicenseKey)   { $LicenseKey   = "YOUR-LICENSE-KEY-HERE" }
 
@@ -26,7 +32,6 @@ if (-not $LicenseKey)   { $LicenseKey   = "YOUR-LICENSE-KEY-HERE" }
 function Ensure-Directory { param ($Path)
     if (!(Test-Path $Path)) { New-Item -ItemType Directory -Force -Path $Path | Out-Null }
 }
-
 Ensure-Directory $WorkDir
 Set-Location $WorkDir
 
@@ -51,9 +56,9 @@ if (!(Test-Path "$WorkDir\7z.exe")) {
 }
 
 # ==============================
-# Run Geekbench (unlock + offline benchmark)
+# Run Geekbench 6 (unlock + no-upload)
 # ==============================
-Write-Host "`n=== Running Geekbench 6 (offline mode) ===" -ForegroundColor Yellow
+Write-Host "`n=== Running Geekbench 6 (offline) ===" -ForegroundColor Yellow
 $GeekLog = "$WorkDir\geekbench_output.txt"
 
 # Detect binary
@@ -69,14 +74,14 @@ $GeekExe = if (Test-Path "$WorkDir\Geekbench\geekbench6.exe") {
 Write-Host "Unlocking Geekbench license for $LicenseEmail..." -ForegroundColor Cyan
 & $GeekExe --unlock $LicenseEmail $LicenseKey | Out-Null
 
-# --- Run benchmark ---
+# --- Run CPU benchmark fully offline ---
 $startTime = Get-Date
-Write-Host "Executing: $GeekExe --upload 0"
-& $GeekExe --upload 0 | Tee-Object -FilePath $GeekLog
+Write-Host "Executing: $GeekExe --cpu --no-upload"
+& $GeekExe --cpu --no-upload | Tee-Object -FilePath $GeekLog
 $endTime = Get-Date
 $duration = [math]::Round(($endTime - $startTime).TotalSeconds,2)
 
-# Parse Geekbench output
+# --- Parse Geekbench output ---
 $GeekOutput = Get-Content $GeekLog -Raw
 $Single = [regex]::Match($GeekOutput, "Single-Core Score:\s+(\d+)").Groups[1].Value
 $Multi  = [regex]::Match($GeekOutput, "Multi-Core Score:\s+(\d+)").Groups[1].Value
