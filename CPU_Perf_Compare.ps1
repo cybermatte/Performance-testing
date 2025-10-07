@@ -1,7 +1,7 @@
 # 💡 Set via environment variables or hard-code below:
 #   $env:GEEKBENCH_EMAIL   = "you@example.com"
 #   $env:GEEKBENCH_LICENSE = "XXXX-XXXX-XXXX-XXXX"
-$LicenseEmail = "mattias.lundgren"
+$LicenseEmail = ""
 $LicenseKey   = ""
 
 <#
