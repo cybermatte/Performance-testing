@@ -3,6 +3,7 @@
     Runs CPU benchmarks (Geekbench + 7-Zip) and logs results for comparison.
 .DESCRIPTION
     Fixed version that shows Geekbench output live and captures results properly.
+    2
 #>
 
 # ==============================
