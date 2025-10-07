@@ -1,0 +1,93 @@
+<#
+.SYNOPSIS
+    Runs CPU benchmarks (Geekbench + 7-Zip) and logs results for comparison.
+.DESCRIPTION
+    Downloads tools if missing, executes benchmarks, parses results,
+    and appends them to C:\CPU_Benchmarks.csv
+#>
+
+# ==============================
+# SETTINGS
+# ==============================
+$LogFile = "C:\CPU_Benchmarks.csv"
+$WorkDir = "$env:TEMP\CPU_Benchmark"
+$GeekbenchUrl = "https://cdn.geekbench.com/Geekbench-6.3.0-Windows.zip"
+$SevenZipUrl = "https://www.7-zip.org/a/7z2408-x64.exe"
+# ==============================
+
+function Ensure-Directory {
+    param ($Path)
+    if (!(Test-Path $Path)) { New-Item -ItemType Directory -Force -Path $Path | Out-Null }
+}
+
+Ensure-Directory $WorkDir
+Set-Location $WorkDir
+
+# ==============================
+# Download Geekbench
+# ==============================
+if (!(Test-Path "$WorkDir\Geekbench\geekbench6.exe")) {
+    Write-Host "Downloading Geekbench..." -ForegroundColor Cyan
+    $zip = "$WorkDir\geekbench.zip"
+    Invoke-WebRequest -Uri $GeekbenchUrl -OutFile $zip -UseBasicParsing
+    Expand-Archive $zip -DestinationPath "$WorkDir\Geekbench" -Force
+}
+
+# ==============================
+# Download 7-Zip
+# ==============================
+if (!(Test-Path "$WorkDir\7z.exe")) {
+    Write-Host "Downloading 7-Zip..." -ForegroundColor Cyan
+    $exe = "$WorkDir\7zsetup.exe"
+    Invoke-WebRequest -Uri $SevenZipUrl -OutFile $exe -UseBasicParsing
+    Start-Process -FilePath $exe -ArgumentList "/S /D=$WorkDir" -Wait
+}
+
+# ==============================
+# Run Geekbench
+# ==============================
+Write-Host "`n=== Running Geekbench 6 ===" -ForegroundColor Yellow
+$GeekLog = "$WorkDir\geekbench_output.txt"
+$startTime = Get-Date
+Start-Process -FilePath "$WorkDir\Geekbench\geekbench6.exe" -ArgumentList "--upload 0" -RedirectStandardOutput $GeekLog -Wait
+$endTime = Get-Date
+$duration = [math]::Round(($endTime - $startTime).TotalSeconds,2)
+
+# Parse Geekbench results
+$GeekOutput = Get-Content $GeekLog -Raw
+$Single = [regex]::Match($GeekOutput, "Single-Core Score:\s+(\d+)").Groups[1].Value
+$Multi  = [regex]::Match($GeekOutput, "Multi-Core Score:\s+(\d+)").Groups[1].Value
+
+# ==============================
+# Run 7-Zip benchmark
+# ==============================
+Write-Host "`n=== Running 7-Zip benchmark ===" -ForegroundColor Yellow
+$SevenLog = "$WorkDir\7zip_output.txt"
+Start-Process -FilePath "$WorkDir\7z.exe" -ArgumentList "b" -RedirectStandardOutput $SevenLog -Wait
+
+# Parse 7-Zip MIPS
+$SevenOutput = Get-Content $SevenLog -Raw
+$Mips = [regex]::Match($SevenOutput, "Tot:\s+(\d+)").Groups[1].Value
+
+# ==============================
+# Collect system info
+# ==============================
+$Server = $env:COMPUTERNAME
+$Date = Get-Date -Format "yyyy-MM-dd HH:mm"
+$Cores = (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+
+# ==============================
+# Write to CSV
+# ==============================
+if (!(Test-Path $LogFile)) {
+    "Server,Date,Cores,Geekbench_Single,Geekbench_Multi,7Zip_MIPS,Duration_s" | Out-File $LogFile -Encoding UTF8
+}
+
+"$Server,$Date,$Cores,$Single,$Multi,$Mips,$duration" | Out-File $LogFile -Append -Encoding UTF8
+
+Write-Host "`n✅ Benchmark complete for $Server" -ForegroundColor Green
+Write-Host "Geekbench Single-Core: $Single"
+Write-Host "Geekbench Multi-Core:  $Multi"
+Write-Host "7-Zip Total MIPS:      $Mips"
+Write-Host "Duration: $duration s"
+Write-Host "Results saved to $LogFile" -ForegroundColor Cyan
