@@ -4,12 +4,11 @@
 $LicenseEmail = "mattias.lundgren"
 $LicenseKey   = ""
 
-
 <#
 .SYNOPSIS
-    Runs Geekbench 6 and 7-Zip CPU benchmarks, logs results for comparison.
+    Runs Geekbench 6 (offline) and 7-Zip CPU benchmarks, logs results for comparison.
 .DESCRIPTION
-    Uses Geekbench 6 Pro license (--unlock) and --no-upload for fully offline runs.
+    Uses Geekbench Pro license (--unlock), runs with --no-upload, and parses modern output format.
 #>
 
 # ==============================
@@ -20,11 +19,9 @@ $WorkDir      = "$env:TEMP\CPU_Benchmark"
 $GeekbenchUrl = "https://cdn.geekbench.com/Geekbench-6.3.0-Windows.zip"
 $SevenZipUrl  = "https://www.7-zip.org/a/7z2408-x64.exe"
 
-# 💡 Supply via environment variables or edit here
+# 💡 Supply these via environment variables or edit here:
 #   $env:GEEKBENCH_EMAIL   = "you@example.com"
 #   $env:GEEKBENCH_LICENSE = "XXXX-XXXX-XXXX-XXXX"
-$LicenseEmail = $env:GEEKBENCH_EMAIL
-$LicenseKey   = $env:GEEKBENCH_LICENSE
 if (-not $LicenseEmail) { $LicenseEmail = "YOUR-EMAIL-HERE" }
 if (-not $LicenseKey)   { $LicenseKey   = "YOUR-LICENSE-KEY-HERE" }
 
@@ -81,10 +78,10 @@ Write-Host "Executing: $GeekExe --cpu --no-upload"
 $endTime = Get-Date
 $duration = [math]::Round(($endTime - $startTime).TotalSeconds,2)
 
-# --- Parse Geekbench output ---
+# --- Parse Geekbench output (handles both ':' and space-separated formats) ---
 $GeekOutput = Get-Content $GeekLog -Raw
-$Single = [regex]::Match($GeekOutput, "Single-Core Score:\s+(\d+)").Groups[1].Value
-$Multi  = [regex]::Match($GeekOutput, "Multi-Core Score:\s+(\d+)").Groups[1].Value
+$Single = [regex]::Match($GeekOutput, "Single[-\s]?Core\s+Score[:\s]+(\d+)", 'IgnoreCase').Groups[1].Value
+$Multi  = [regex]::Match($GeekOutput, "Multi[-\s]?Core\s+Score[:\s]+(\d+)", 'IgnoreCase').Groups[1].Value
 if (-not $Single) { $Single = "N/A" }
 if (-not $Multi)  { $Multi  = "N/A" }
 
@@ -96,7 +93,7 @@ $SevenLog = "$WorkDir\7zip_output.txt"
 & "$WorkDir\7z.exe" b | Tee-Object -FilePath $SevenLog | Out-Null
 
 $SevenOutput = Get-Content $SevenLog -Raw
-$Mips = [regex]::Match($SevenOutput, "Tot:\s+(\d+)").Groups[1].Value
+$Mips = [regex]::Match($SevenOutput, "Tot:\s+(\d+)", 'IgnoreCase').Groups[1].Value
 if (-not $Mips) { $Mips = "N/A" }
 
 # ==============================
