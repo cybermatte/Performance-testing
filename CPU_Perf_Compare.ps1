@@ -2,27 +2,28 @@
 .SYNOPSIS
     Runs CPU benchmarks (Geekbench + 7-Zip) and logs results for comparison.
 .DESCRIPTION
-    Offline-compatible version using Geekbench Pro license key via $LicenseKey variable.
+    Offline-compatible version using Geekbench Pro license unlock (email + key).
 #>
 
 # ==============================
 # SETTINGS
 # ==============================
-$LogFile = "C:\CPU_Benchmarks.csv"
-$WorkDir = "$env:TEMP\CPU_Benchmark"
+$LogFile      = "C:\CPU_Benchmarks.csv"
+$WorkDir      = "$env:TEMP\CPU_Benchmark"
 $GeekbenchUrl = "https://cdn.geekbench.com/Geekbench-6.3.0-Windows.zip"
-$SevenZipUrl = "https://www.7-zip.org/a/7z2408-x64.exe"
+$SevenZipUrl  = "https://www.7-zip.org/a/7z2408-x64.exe"
 
-# 💡 Insert your license key here or inject via environment variable
-# Example: $env:GEEKBENCH_LICENSE = "XXXX-XXXX-XXXX-XXXX"
-$LicenseKey = ""
-if (-not $LicenseKey) {
-    $LicenseKey = "YOUR-LICENSE-KEY-HERE"
-}
+# 💡 Set via environment variables or hard-code below:
+#   $env:GEEKBENCH_EMAIL   = "you@example.com"
+#   $env:GEEKBENCH_LICENSE = "XXXX-XXXX-XXXX-XXXX"
+$LicenseEmail = "mattias.lundgren"
+$LicenseKey   = ""
+
+if (-not $LicenseEmail) { $LicenseEmail = "YOUR-EMAIL-HERE" }
+if (-not $LicenseKey)   { $LicenseKey   = "YOUR-LICENSE-KEY-HERE" }
+
 # ==============================
-
-function Ensure-Directory {
-    param ($Path)
+function Ensure-Directory { param ($Path)
     if (!(Test-Path $Path)) { New-Item -ItemType Directory -Force -Path $Path | Out-Null }
 }
 
@@ -40,14 +41,6 @@ if (!(Test-Path "$WorkDir\Geekbench\geekbench6.exe")) {
 }
 
 # ==============================
-# Apply license (offline mode)
-# ==============================
-if ($LicenseKey -and !(Test-Path "$WorkDir\Geekbench\geekbench.license")) {
-    Write-Host "Applying Geekbench license..." -ForegroundColor Cyan
-    Set-Content -Path "$WorkDir\Geekbench\geekbench.license" -Value $LicenseKey -Encoding ASCII
-}
-
-# ==============================
 # Download 7-Zip
 # ==============================
 if (!(Test-Path "$WorkDir\7z.exe")) {
@@ -58,7 +51,7 @@ if (!(Test-Path "$WorkDir\7z.exe")) {
 }
 
 # ==============================
-# Run Geekbench (offline)
+# Run Geekbench (unlock + offline benchmark)
 # ==============================
 Write-Host "`n=== Running Geekbench 6 (offline mode) ===" -ForegroundColor Yellow
 $GeekLog = "$WorkDir\geekbench_output.txt"
@@ -70,10 +63,13 @@ $GeekExe = if (Test-Path "$WorkDir\Geekbench\geekbench6.exe") {
     "$WorkDir\Geekbench\geekbench6_x64.exe"
 } elseif (Test-Path "$WorkDir\Geekbench\geekbench6_x86.exe") {
     "$WorkDir\Geekbench\geekbench6_x86.exe"
-} else {
-    throw "Geekbench executable not found."
-}
+} else { throw "Geekbench executable not found." }
 
+# --- Unlock license ---
+Write-Host "Unlocking Geekbench license for $LicenseEmail..." -ForegroundColor Cyan
+& $GeekExe --unlock $LicenseEmail $LicenseKey | Out-Null
+
+# --- Run benchmark ---
 $startTime = Get-Date
 Write-Host "Executing: $GeekExe --upload 0"
 & $GeekExe --upload 0 | Tee-Object -FilePath $GeekLog
@@ -102,16 +98,17 @@ if (-not $Mips) { $Mips = "N/A" }
 # Collect system info
 # ==============================
 $Server = $env:COMPUTERNAME
-$Date = Get-Date -Format "yyyy-MM-dd HH:mm"
-$Cores = (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+$Date   = Get-Date -Format "yyyy-MM-dd HH:mm"
+$CPU    = (Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)
+$Cores  = (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
 
 # ==============================
 # Write to CSV
 # ==============================
 if (!(Test-Path $LogFile)) {
-    "Server,Date,Cores,Geekbench_Single,Geekbench_Multi,7Zip_MIPS,Duration_s" | Out-File $LogFile -Encoding UTF8
+    "Server,Date,CPU,Cores,Geekbench_Single,Geekbench_Multi,7Zip_MIPS,Duration_s" | Out-File $LogFile -Encoding UTF8
 }
-"$Server,$Date,$Cores,$Single,$Multi,$Mips,$duration" | Out-File $LogFile -Append -Encoding UTF8
+"$Server,$Date,$CPU,$Cores,$Single,$Multi,$Mips,$duration" | Out-File $LogFile -Append -Encoding UTF8
 
 Write-Host "`n✅ Benchmark complete for $Server" -ForegroundColor Green
 Write-Host "Geekbench Single-Core: $Single"
