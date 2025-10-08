@@ -5,216 +5,209 @@ $LicenseEmail = ""
 $LicenseKey   = ""
 
 <#
-.SYNOPSIS
-    Comprehensive CPU benchmark & stress suite for Windows.
-.DESCRIPTION
-    Runs Geekbench, 7-Zip, Cinebench R23, Prime95, and Intel LINPACK (oneMKL).
-    Uses local archives from C:\Temp.
-    Logs results to C:\CPU_Benchmarks.csv
+    CPU_Perf_Compare_v8.5.ps1
+    ---------------------------------------------------------
+    Comprehensive CPU benchmark suite:
+      • Geekbench 6
+      • 7-Zip Benchmark (24.08)
+      • Cinebench R23 (CSV parser)
+      • Prime95 short stress
+      • Intel LINPACK (oneMKL)
 #>
 
-# ==============================
-# SETTINGS
-# ==============================
-$LogFile      = "C:\CPU_Benchmarks.csv"
-$WorkDir      = "$env:TEMP\CPU_Benchmark"
-$GeekbenchUrl = "https://cdn.geekbench.com/Geekbench-6.3.0-Windows.zip"
-$SevenZipUrl  = "https://www.7-zip.org/a/7z2408-x64.exe"
-$Prime95Url   = "https://www.mersenne.org/ftp_root/gimps/p95v308b17.win64.zip"
+$ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
-# Local archives (manual)
-$CineZipLocal    = "C:\Temp\CinebenchR23.zip"
-$LinpackZipLocal = "C:\Temp\w_onemklbench_p_2025.2.0_531.zip"
+# Global paths
+$WorkDir   = "C:\TEMP"
+$ResultCSV = "$WorkDir\CPU_Performance_Results.csv"
+New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
 
-function Ensure-Directory { param ($Path)
-    if (!(Test-Path $Path)) { New-Item -ItemType Directory -Force -Path $Path | Out-Null }
-}
-Ensure-Directory $WorkDir
-Set-Location $WorkDir
-
-# ==============================
-# Download tools (if missing)
-# ==============================
-if (!(Test-Path "$WorkDir\Geekbench\geekbench6.exe")) {
-    Write-Host "Downloading Geekbench..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $GeekbenchUrl -OutFile "$WorkDir\geekbench.zip"
-    Expand-Archive "$WorkDir\geekbench.zip" -DestinationPath "$WorkDir\Geekbench" -Force
+function Ensure-Directory($path) {
+    if (-not (Test-Path $path)) { New-Item -ItemType Directory -Force -Path $path | Out-Null }
 }
 
-if (!(Test-Path "$WorkDir\7z.exe")) {
-    Write-Host "Downloading 7-Zip..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $SevenZipUrl -OutFile "$WorkDir\7zsetup.exe"
-    Start-Process -FilePath "$WorkDir\7zsetup.exe" -ArgumentList "/S /D=$WorkDir" -Wait
+# =====================================================================
+# 1. Geekbench 6
+# =====================================================================
+Write-Host "`n=== Geekbench 6 ===" -ForegroundColor Yellow
+$GeekURL  = "https://cdn.geekbench.com/Geekbench-6.3.0-Windows.zip"
+$GeekZip  = "$WorkDir\Geekbench6.zip"
+$GeekRoot = "$WorkDir\Geekbench6"
+$GeekExe  = "$GeekRoot\geekbench6.exe"
+
+if (-not (Test-Path $GeekExe)) {
+    Write-Host "Downloading Geekbench 6..." -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $GeekURL -OutFile $GeekZip -UseBasicParsing
+    Ensure-Directory $GeekRoot
+    Expand-Archive -Path $GeekZip -DestinationPath $GeekRoot -Force
 }
 
-if (!(Test-Path "$WorkDir\prime95\prime95.exe")) {
-    Write-Host "Downloading Prime95..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $Prime95Url -OutFile "$WorkDir\prime95.zip"
-    Expand-Archive "$WorkDir\prime95.zip" -DestinationPath "$WorkDir\prime95" -Force
+if (Test-Path $GeekExe) {
+    $GeekLog = "$WorkDir\geekbench6.txt"
+    & $GeekExe --cpu --no-upload | Tee-Object -FilePath $GeekLog
+    $GB_Single = [regex]::Match((Get-Content $GeekLog -Raw), 'Single-Core Score\s+(\d+)', 'IgnoreCase').Groups[1].Value
+    $GB_Multi  = [regex]::Match((Get-Content $GeekLog -Raw), 'Multi-Core Score\s+(\d+)',  'IgnoreCase').Groups[1].Value
+} else {
+    Write-Warning "Geekbench not found — skipping."
+    $GB_Single = $GB_Multi = "N/A"
 }
 
-# ==============================
-# Cinebench (from local ZIP)
-# ==============================
-Write-Host "`n=== Preparing Cinebench R23 ===" -ForegroundColor Yellow
-$CineDest = "$WorkDir\Cinebench"
+# =====================================================================
+# 2. 7-Zip Benchmark (24.08)
+# =====================================================================
+Write-Host "`n=== 7-Zip Benchmark ===" -ForegroundColor Yellow
+$SevenURL = "https://www.7-zip.org/a/7z2408-x64.exe"
+$SevenInstaller = "$WorkDir\7z2408-x64.exe"
+$SevenRoot = "$WorkDir\7zip"
+$SevenExe = "$SevenRoot\7z.exe"
+
+if (-not (Test-Path $SevenExe)) {
+    Write-Host "Downloading and installing 7-Zip..." -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $SevenURL -OutFile $SevenInstaller -UseBasicParsing
+    Start-Process -FilePath $SevenInstaller -ArgumentList "/S /D=$SevenRoot" -Wait
+}
+
+$Seven_MIPS = "N/A"
+if (Test-Path $SevenExe) {
+    $SevenLog = "$WorkDir\7zip.txt"
+    & $SevenExe b -bb3 | Tee-Object -FilePath $SevenLog
+
+    # Robust parser (confirmed with 7-Zip 24.08)
+    if (Test-Path $SevenLog) {
+        $SevenText = Get-Content $SevenLog -Raw
+        $match = [regex]::Match($SevenText, 'Tot:.*?(\d{4,6})\s*$', 'Multiline,IgnoreCase')
+        if ($match.Success) {
+            $Seven_MIPS = $match.Groups[1].Value
+        } else {
+            $last = [regex]::Matches($SevenText, '(\d{4,6})\s*MIPS') | Select-Object -Last 1
+            if ($last) { $Seven_MIPS = $last.Groups[1].Value }
+        }
+        if (-not $Seven_MIPS) { $Seven_MIPS = "N/A" }
+    }
+} else {
+    Write-Warning "7-Zip executable not found — skipping."
+}
+
+# =====================================================================
+# 3. Cinebench R23
+# =====================================================================
+Write-Host "`n=== Cinebench R23 ===" -ForegroundColor Yellow
+$CineZipLocal = "$WorkDir\CinebenchR23.zip"
+$CineRoot     = "$WorkDir\CinebenchR23"
+$CineExe      = "$CineRoot\Cinebench.exe"
+
+if (-not (Test-Path $CineExe)) {
+    if (Test-Path $CineZipLocal) {
+        Write-Host "Extracting existing Cinebench archive..." -ForegroundColor Cyan
+        Expand-Archive -Path $CineZipLocal -DestinationPath $CineRoot -Force
+    } else {
+        Write-Warning "CinebenchR23.zip not found in $WorkDir — place it manually."
+    }
+}
+
 $CB_Single = "N/A"
 $CB_Multi  = "N/A"
 
-if (Test-Path $CineZipLocal) {
-    Write-Host "Found local Cinebench archive: $CineZipLocal" -ForegroundColor Green
-    Ensure-Directory $CineDest
-    if (!(Get-ChildItem $CineDest -Recurse -Filter "Cinebench.exe" -ErrorAction SilentlyContinue)) {
-        Write-Host "Extracting CinebenchR23.zip to $CineDest..." -ForegroundColor Cyan
-        Expand-Archive -Path $CineZipLocal -DestinationPath $CineDest -Force
-    }
+if (Test-Path $CineExe) {
+    Write-Host "Running Cinebench R23 multi-core test..." -ForegroundColor Cyan
+    Start-Process -FilePath $CineExe -ArgumentList "g_CinebenchCpuXTest=true g_CinebenchLogFile=true" -Wait
 
-    $CineExe = (Get-ChildItem "$CineDest" -Filter "Cinebench.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
-    $CineLog = "$WorkDir\cinebench_output.txt"
+    Write-Host "Running Cinebench R23 single-core test..." -ForegroundColor Cyan
+    Start-Process -FilePath $CineExe -ArgumentList "g_CinebenchCpu1Test=true g_CinebenchLogFile=true" -Wait
 
-    if ($CineExe -and (Test-Path $CineExe)) {
-        Write-Host "Found Cinebench at: $CineExe" -ForegroundColor Green
-        Start-Process -FilePath $CineExe -ArgumentList "-cb_cpux -single -nogui" -Wait -RedirectStandardOutput $CineLog
-        $CineOutput = Get-Content $CineLog -Raw
-        $CB_Single = [regex]::Match($CineOutput, "CPU \(Single Core\)\s*:\s*(\d+)", 'IgnoreCase').Groups[1].Value
-        $CB_Multi  = [regex]::Match($CineOutput, "CPU \(Multi Core\)\s*:\s*(\d+)", 'IgnoreCase').Groups[1].Value
-        if (-not $CB_Single) { $CB_Single = "N/A" }
-        if (-not $CB_Multi)  { $CB_Multi  = "N/A" }
-    } else {
-        Write-Warning "Cinebench.exe not found after extraction — skipping Cinebench test."
+    $CineCSV = "$env:USERPROFILE\Documents\CinebenchR23\cb_ranking.csv"
+    if (Test-Path $CineCSV) {
+        $csvText = Get-Content $CineCSV -Raw
+        $CB_Single = [regex]::Match($csvText, 'Single Core.*?,(\d+)', 'IgnoreCase').Groups[1].Value
+        $CB_Multi  = [regex]::Match($csvText, 'Multi Core.*?,(\d+)', 'IgnoreCase').Groups[1].Value
     }
 } else {
-    Write-Warning "Local CinebenchR23.zip not found in C:\Temp — skipping Cinebench test."
+    Write-Warning "Cinebench executable not found — skipping."
 }
 
-# ==============================
-# LINPACK (Intel oneMKL)
-# ==============================
-Write-Host "`n=== Preparing Intel LINPACK (oneMKL) ===" -ForegroundColor Yellow
-$LinpackRoot = "$WorkDir\linpack"
-$Lin_GFLOPS  = "N/A"
+# =====================================================================
+# 4. Prime95
+# =====================================================================
+Write-Host "`n=== Prime95 (short stress, 60 s) ===" -ForegroundColor Yellow
+$PrimeURL  = "https://download.mersenne.ca/gimps/v30/30.19/p95v3019b20.win64.zip"
+$PrimeZip  = "$WorkDir\Prime95.zip"
+$PrimeRoot = "$WorkDir\Prime95"
+$PrimeExe  = "$PrimeRoot\prime95.exe"
 
-if (Test-Path $LinpackZipLocal) {
-    Write-Host "Found local Intel oneMKL archive: $LinpackZipLocal" -ForegroundColor Green
-    Ensure-Directory $LinpackRoot
-
-    if (-not (Get-ChildItem $LinpackRoot -Recurse -Filter "linpack_xeon64.exe" -ErrorAction SilentlyContinue)) {
-        Write-Host "Extracting Intel oneMKL ZIP to $LinpackRoot..." -ForegroundColor Cyan
-        Expand-Archive -Path $LinpackZipLocal -DestinationPath $LinpackRoot -Force
-    }
-
-    $LinExe = Get-ChildItem $LinpackRoot -Recurse -ErrorAction SilentlyContinue `
-        -Include "linpack_xeon64.exe","xlinpack_xeon64.exe" | Select-Object -First 1
-
-    if ($LinExe) {
-        $LinDir = Split-Path $LinExe.FullName -Parent
-        $LinOut = "$WorkDir\linpack_output.txt"
-        Write-Host "Found LINPACK at: $($LinExe.FullName)" -ForegroundColor Green
-
-        Push-Location $LinDir
-        Start-Process -FilePath $LinExe.FullName -Wait -RedirectStandardOutput $LinOut
-        Pop-Location
-
-        if (Test-Path $LinOut) {
-            $LinOutput = Get-Content $LinOut -Raw
-            $Lin_GFLOPS = ([regex]::Match($LinOutput, "GFLOPS\s*=\s*([\d\.]+)", 'IgnoreCase').Groups[1].Value)
-            if (-not $Lin_GFLOPS) {
-                $Lin_GFLOPS = ([regex]::Match($LinOutput, "Performance:\s*([\d\.]+)\s*GFLOPS", 'IgnoreCase').Groups[1].Value)
-            }
-            if (-not $Lin_GFLOPS) { $Lin_GFLOPS = "N/A" }
-        } else {
-            Write-Warning "LINPACK did not produce output — check permissions or binary compatibility."
-        }
-    } else {
-        Write-Warning "LINPACK executable not found after extraction — skipping test."
-    }
-} else {
-    Write-Warning "Local Intel LINPACK ZIP not found in C:\Temp — skipping LINPACK test."
+if (-not (Test-Path $PrimeExe)) {
+    Write-Host "Downloading Prime95..." -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $PrimeURL -OutFile $PrimeZip -UseBasicParsing
+    Ensure-Directory $PrimeRoot
+    Expand-Archive -Path $PrimeZip -DestinationPath $PrimeRoot -Force
 }
 
-# ==============================
-# Geekbench 6
-# ==============================
-Write-Host "`n=== Running Geekbench 6 (offline) ===" -ForegroundColor Yellow
-$GeekExe = (Get-ChildItem "$WorkDir\Geekbench" -Filter "geekbench6*.exe" -Recurse | Select-Object -First 1).FullName
-$GeekLog = "$WorkDir\geekbench_output.txt"
-$GB_Single = "N/A"; $GB_Multi = "N/A"; $GB_Duration = 0
-
-if ($GeekExe) {
-    Write-Host "Unlocking Geekbench license..." -ForegroundColor Cyan
-    & $GeekExe --unlock $env:GEEKBENCH_EMAIL $env:GEEKBENCH_LICENSE | Out-Null
-    $startTime = Get-Date
-    & $GeekExe --cpu --no-upload | Tee-Object -FilePath $GeekLog
-    $endTime = Get-Date
-    $GB_Duration = [math]::Round(($endTime - $startTime).TotalSeconds,2)
-    $GeekOutput = Get-Content $GeekLog -Raw
-    $GB_Single = [regex]::Match($GeekOutput, "Single[-\s]?Core\s+Score[:\s]+(\d+)", 'IgnoreCase').Groups[1].Value
-    $GB_Multi  = [regex]::Match($GeekOutput, "Multi[-\s]?Core\s+Score[:\s]+(\d+)",  'IgnoreCase').Groups[1].Value
-} else {
-    Write-Warning "Geekbench executable not found — skipping."
-}
-
-# ==============================
-# 7-Zip
-# ==============================
-Write-Host "`n=== Running 7-Zip benchmark ===" -ForegroundColor Yellow
-$Z_MIPS = "N/A"
-if (Test-Path "$WorkDir\7z.exe") {
-    $SevenLog = "$WorkDir\7zip_output.txt"
-    & "$WorkDir\7z.exe" b | Tee-Object -FilePath $SevenLog | Out-Null
-    $SevenOutput = Get-Content $SevenLog -Raw
-    $Z_MIPS = [regex]::Match($SevenOutput, "Tot:\s+(\d+)", 'IgnoreCase').Groups[1].Value
-} else {
-    Write-Warning "7-Zip not found — skipping benchmark."
-}
-
-# ==============================
-# Prime95 (short stress)
-# ==============================
-Write-Host "`n=== Running Prime95 (short stress test, 60 s) ===" -ForegroundColor Yellow
-if (Test-Path "$WorkDir\prime95\prime95.exe") {
-    Start-Process -FilePath "$WorkDir\prime95\prime95.exe" -ArgumentList "-t" -WindowStyle Hidden
+if (Test-Path $PrimeExe) {
+    Start-Process -FilePath $PrimeExe -ArgumentList "-t" -WorkingDirectory $PrimeRoot
     Start-Sleep -Seconds 60
     Get-Process prime95 -ErrorAction SilentlyContinue | Stop-Process -Force
+    $PrimeResult = "PASS"
 } else {
-    Write-Warning "Prime95 not found — skipping stress test."
+    Write-Warning "Prime95 not found — skipping."
+    $PrimeResult = "N/A"
 }
 
-# ==============================
-# Collect system info
-# ==============================
-$Server = $env:COMPUTERNAME
-$Date   = Get-Date -Format "yyyy-MM-dd HH:mm"
-$CPU    = (Get-CimInstance Win32_Processor | Select-Object -First 1 -ExpandProperty Name)
-$Cores  = (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+# =====================================================================
+# 5. Intel LINPACK
+# =====================================================================
+Write-Host "`n=== Intel LINPACK (oneMKL) ===" -ForegroundColor Yellow
+$LinpackRoot = "C:\Temp\w_onemklbench_p_2025.2.0_531\benchmarks_2025.2\windows\share\mkl\benchmarks\linpack"
+$LinExe = "$LinpackRoot\linpack_xeon64.exe"
 
-# ==============================
-# Write to CSV
-# ==============================
-if (!(Test-Path $LogFile)) {
-    "Server,Date,CPU,Cores,Geek_Single,Geek_Multi,7Zip_MIPS,Cine_Single,Cine_Multi,LINPACK_GFLOPS,Duration_s" |
-        Out-File $LogFile -Encoding UTF8
+if (-not (Test-Path $LinExe)) {
+    Write-Warning "LINPACK executable not found — skipping."
+    $Lin_GFLOPS = "N/A"
+} else {
+    $LinInput = "$LinpackRoot\lininput_xeon64"
+    if (-not (Test-Path $LinInput)) {
+@"
+Intel(R) LINPACK data file
+Sample benchmark run
+5
+1000 2000 3000 4000 5000
+1000 2008 3000 4008 5000
+4 4 2 1 1
+4 4 4 4 4
+"@ | Set-Content -NoNewline -Path $LinInput
+    }
+
+    Push-Location $LinpackRoot
+    Start-Process -FilePath "cmd.exe" -ArgumentList '/c "linpack_xeon64.exe lininput_xeon64 > linpack_xeon64.out"' -NoNewWindow -Wait
+    Pop-Location
+
+    $LinResultFile = "$LinpackRoot\linpack_xeon64.out"
+    if (Test-Path $LinResultFile) {
+        $LinOutput = Get-Content $LinResultFile -Raw
+        $perfBlock = [regex]::Match($LinOutput, 'Performance\s+Summary.*?(?=End\s+of\s+tests)', 'Singleline,IgnoreCase').Value
+        if ($perfBlock) {
+            $numbers = [regex]::Matches($perfBlock, '\b\d+\.\d+\b') | ForEach-Object { [double]$_.Value }
+            $Lin_GFLOPS = ($numbers | Measure-Object -Maximum).Maximum
+        } else { $Lin_GFLOPS = "N/A" }
+    } else {
+        Write-Warning "LINPACK output not found."
+        $Lin_GFLOPS = "N/A"
+    }
 }
-"$Server,$Date,$CPU,$Cores,$GB_Single,$GB_Multi,$Z_MIPS,$CB_Single,$CB_Multi,$Lin_GFLOPS,$GB_Duration" |
-    Out-File $LogFile -Append -Encoding UTF8
 
-# ==============================
-# Summary
-# ==============================
-Write-Host "`n✅ Benchmark suite complete for $Server" -ForegroundColor Green
-Write-Host ""
-Write-Host ("{0,-20}{1,10}" -f "Geekbench 6 Single:", $GB_Single)
-Write-Host ("{0,-20}{1,10}" -f "Geekbench 6 Multi:", $GB_Multi)
-Write-Host ("{0,-20}{1,10}" -f "7-Zip MIPS:", $Z_MIPS)
-Write-Host ("{0,-20}{1,10}" -f "Cinebench Single:", $CB_Single)
-Write-Host ("{0,-20}{1,10}" -f "Cinebench Multi:", $CB_Multi)
-Write-Host ("{0,-20}{1,10}" -f "LINPACK GFLOPS:", $Lin_GFLOPS)
-Write-Host ("{0,-20}{1,10}" -f "Duration (s):", $GB_Duration)
-Write-Host "`nResults saved to $LogFile" -ForegroundColor Cyan
-
-# Display short summary table (if multiple servers tested)
-if (Test-Path $LogFile) {
-    Write-Host "`n=== Summary of all recorded results ===" -ForegroundColor Yellow
-    Import-Csv $LogFile | Sort-Object -Property Geek_Multi -Descending | Format-Table Server, Geek_Multi, Cine_Multi, LINPACK_GFLOPS, CPU -AutoSize
+# =====================================================================
+# 6. Write Results
+# =====================================================================
+$Result = [PSCustomObject]@{
+    Hostname        = $env:COMPUTERNAME
+    Timestamp       = (Get-Date)
+    GeekbenchSingle = $GB_Single
+    GeekbenchMulti  = $GB_Multi
+    "7Zip(MIPS)"    = $Seven_MIPS
+    Cine_Single     = $CB_Single
+    Cine_Multi      = $CB_Multi
+    Prime95         = $PrimeResult
+    LINPACK_GFLOPS  = $Lin_GFLOPS
 }
-
+$Result | Export-Csv -Path $ResultCSV -Append -NoTypeInformation -Encoding UTF8
+Write-Host "`n✅ Results written to $ResultCSV" -ForegroundColor Cyan
+$Result
