@@ -3,7 +3,7 @@
 #   $env:GEEKBENCH_LICENSE = "XXXX-XXXX-XXXX-XXXX"
 $LicenseEmail = ""
 $LicenseKey   = ""
-
+#2
 <# =====================================================================
    CPU Performance Benchmark Suite v8.6
    Author: ChatGPT (for Mattias)
@@ -180,11 +180,34 @@ $LinGFLOPS = "N/A"
 if (Test-Path $LinExe) {
     Write-Host "Running LINPACK benchmark..." -ForegroundColor Cyan
     cmd /c "`"cd /d $LinDir && linpack_xeon64.exe < lininput_xeon64 > $LinOut`""
+
+
     if (Test-Path $LinOut) {
         $txt = Get-Content $LinOut -Raw
-        $LinGFLOPS = [regex]::Matches($txt, "([0-9]+\.[0-9]+)\s*$", 'IgnoreCase') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Last 1
-        if (-not $LinGFLOPS) { $LinGFLOPS = "N/A" }
+
+        # --- Try to extract the last GFLOPS value from the Performance Summary table ---
+        $match = [regex]::Matches($txt, 'Performance Summary.+?^\s*\d+\s+\d+\s+\d+\s+\d+\.\d+\s+([0-9]+\.[0-9]+)', 'Singleline, Multiline')
+        if ($match.Count -gt 0) {
+            # Take the last "Maximal" GFLOPS value
+            $LinGFLOPS = $match[$match.Count - 1].Groups[1].Value
+        }
+        else {
+            # Fallback: just take the highest GFLOPS found anywhere in the file
+            $nums = [regex]::Matches($txt, '\s([0-9]+\.[0-9]+)\s+pass', 'IgnoreCase') |
+                    ForEach-Object { [double]$_.Groups[1].Value }
+            if ($nums.Count -gt 0) {
+                $LinGFLOPS = ($nums | Measure-Object -Maximum).Maximum
+            } else {
+                $LinGFLOPS = "N/A"
+            }
+        }
+    } else {
+        Write-Warning "LINPACK output not found — skipping parse."
+        $LinGFLOPS = "N/A"
     }
+
+
+
 } else {
     Write-Warning "LINPACK not found — skipping."
 }
@@ -214,6 +237,7 @@ $Result = [PSCustomObject]@{
     Cine_Single     = $CB_Single
     Cine_Multi      = $CB_Multi
     Prime95         = $PrimeResult
-    LINPACK_GFLOPS  = $Lin_GFLOPS
+    LINPACK_GFLOPS  = $LinGFLOPS
 }
 $Result 
+
